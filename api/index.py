@@ -26,46 +26,45 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        # mcprofile.io uses this structure to show both Java/Bedrock
         url = f"https://mcprofile.io/profile/{username}"
+        # Professional Headers taaki block na ho
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
+        
         if response.status_code != 200:
-            return jsonify({"status": "error", "message": "User not found on mcprofile.io"}), 404
+            return jsonify({"status": "error", "message": f"User '{username}' not found on any database."}), 404
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Extracting data from the page 
-        # Website usually stores UUID in a meta tag or a specific class
+        # 1. UUID find karne ka solid tarika
         uuid = "N/A"
-        uuid_tag = soup.find("button", {"data-clipboard-text": True})
-        if uuid_tag:
-            uuid = uuid_tag["data-clipboard-text"]
+        copy_btn = soup.find("button", {"data-clipboard-text": True})
+        if copy_btn:
+            uuid = copy_btn["data-clipboard-text"]
 
-        # Skin and Avatar logic
-        # mcprofile uses mc-heads or their own cdn for renders
-        avatar_url = f"https://mc-heads.net/avatar/100/{username}"
-        body_render = f"https://mc-heads.net/body/100/{username}"
-        skin_url = f"https://mc-heads.net/skin/{username}"
-
-        # Check if it's Bedrock (mcprofile usually marks this)
+        # 2. Type find karna (Java ya Bedrock)
         is_bedrock = False
-        if "Bedrock" in response.text or username.startswith('.'):
+        badge = soup.find("span", string=lambda x: x and "Bedrock" in x)
+        if badge or username.startswith('.'):
             is_bedrock = True
 
+        # 3. Image URLs (mcprofile.io uses mc-heads logic)
+        clean_user = username.replace('.', '') if is_bedrock else username
+        
         return jsonify({
             "status": "success",
             "type": "Bedrock" if is_bedrock else "Java",
             "result": {
                 "username": username,
                 "uuid": uuid,
-                "skin_url": skin_url,
-                "avatar": avatar_url,
-                "body_render": body_render,
-                "profile_link": url
+                "avatar": f"https://mc-heads.net/avatar/100/{username}",
+                "body_render": f"https://mc-heads.net/body/100/{username}",
+                "skin_texture": f"https://mc-heads.net/skin/{username}",
+                "mcprofile_url": url
             },
             "credits": {
                 "api_by": "@Configexe",
@@ -74,7 +73,7 @@ def get_mc_profile():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "error", "message": "System Overloaded or Scraping Failed", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run()
