@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
+from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
@@ -25,51 +26,52 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        # Step 1: Pehle Java (Mojang) check karte hain
-        mojang_res = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}")
+        # mcprofile.io uses this structure to show both Java/Bedrock
+        url = f"https://mcprofile.io/profile/{username}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         
-        if mojang_res.status_code == 200:
-            # JAVA USER FOUND
-            data = mojang_res.json()
-            uuid = data['id']
-            return jsonify({
-                "status": "success",
-                "type": "Java",
-                "result": {
-                    "username": data['name'],
-                    "uuid": uuid,
-                    "skin_url": f"https://mc-heads.net/skin/{uuid}",
-                    "body_render": f"https://mc-heads.net/body/100/{uuid}",
-                    "avatar": f"https://mc-heads.net/avatar/100/{uuid}",
-                    "profile_at": f"https://namemc.com/profile/{username}"
-                },
-                "credits": {"api_by": "@Configexe"}
-            })
-        
-        else:
-            # Step 2: Agar Java nahi mila, toh Bedrock check karte hain (Geyser/Floodgate logic)
-            # Bedrock usernames usually start with '.' on many servers, but API uses XUID
-            # Hum mcprofile.io ki internal helper API use karenge
-            bedrock_res = requests.get(f"https://api.geyserconnect.net/v2/xbox/gamertag/{username}")
-            
-            if bedrock_res.status_code == 200:
-                data = bedrock_res.json()
-                xuid = str(data.get('xuid'))
-                return jsonify({
-                    "status": "success",
-                    "type": "Bedrock",
-                    "result": {
-                        "username": data.get('gamertag'),
-                        "xuid": xuid,
-                        "floodgate_id": f"00000000-0000-0000-000{hex(int(xuid))[2:]}",
-                        "avatar": f"https://mc-heads.net/avatar/100/{username}",
-                        "skin_url": "Bedrock skins are managed via Xbox Live",
-                        "note": "Use XUID for bedrock specific tools"
-                    },
-                    "credits": {"api_by": "@Configexe"}
-                })
-            else:
-                return jsonify({"status": "error", "message": "User not found on Java or Bedrock"}), 404
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return jsonify({"status": "error", "message": "User not found on mcprofile.io"}), 404
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extracting data from the page 
+        # Website usually stores UUID in a meta tag or a specific class
+        uuid = "N/A"
+        uuid_tag = soup.find("button", {"data-clipboard-text": True})
+        if uuid_tag:
+            uuid = uuid_tag["data-clipboard-text"]
+
+        # Skin and Avatar logic
+        # mcprofile uses mc-heads or their own cdn for renders
+        avatar_url = f"https://mc-heads.net/avatar/100/{username}"
+        body_render = f"https://mc-heads.net/body/100/{username}"
+        skin_url = f"https://mc-heads.net/skin/{username}"
+
+        # Check if it's Bedrock (mcprofile usually marks this)
+        is_bedrock = False
+        if "Bedrock" in response.text or username.startswith('.'):
+            is_bedrock = True
+
+        return jsonify({
+            "status": "success",
+            "type": "Bedrock" if is_bedrock else "Java",
+            "result": {
+                "username": username,
+                "uuid": uuid,
+                "skin_url": skin_url,
+                "avatar": avatar_url,
+                "body_render": body_render,
+                "profile_link": url
+            },
+            "credits": {
+                "api_by": "@Configexe",
+                "source": "mcprofile.io"
+            }
+        })
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
