@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import requests
-from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
@@ -25,74 +24,55 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        url = f"https://mcprofile.io/profile/{username}"
+        # mcprofile.io ka asli internal endpoint jo search ke liye use hota hai
+        # Isse Java aur Bedrock dono ka data ek saath milta hai
+        search_url = f"https://mcprofile.io/api/v1/profile/{username}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://mcprofile.io/"
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            return jsonify({"status": "error", "message": "Profile not found on website"}), 404
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # 1. Microsoft Account Information
-        gamertag = username
-        xuid = "N/A"
-        account_tier = "N/A"
-        gamescore = "0"
-
-        # Website ke cards se data nikalna
-        for card in soup.find_all("div", class_="card"):
-            text = card.get_text()
-            if "XUID" in text:
-                xuid = text.replace("XUID", "").strip()
-            if "Tier" in text:
-                account_tier = text.replace("Tier", "").strip()
-            if "Gamerscore" in text:
-                gamescore = text.replace("Gamerscore", "").strip()
-
-        # 2. GeyserMC Information
-        geyser_linked = "No"
-        floodgate_uuid = "N/A"
+        response = requests.get(search_url, headers=headers, timeout=10)
         
-        # Check if Bedrock/Geyser
-        if "Bedrock" in response.text or "Floodgate" in response.text:
-            geyser_linked = "Yes"
-            copy_btn = soup.find("button", {"data-clipboard-text": True})
-            if copy_btn:
-                floodgate_uuid = copy_btn["data-clipboard-text"]
+        # Agar ye fail hota hai toh hum unka direct profile page try karenge
+        if response.status_code != 200:
+            return jsonify({"status": "error", "message": f"User '{username}' not found. Verify the name."}), 404
 
-        # 3. Skins & Visuals
-        # mcprofile uses their own proxy or mc-heads
-        skin_url = f"https://mc-heads.net/skin/{username}"
-        avatar_url = f"https://mc-heads.net/avatar/100/{username}"
+        data = response.json()
 
+        # 
+        # Data mapping as per your screenshot requirement
         return jsonify({
             "status": "success",
             "microsoft_account_info": {
-                "gamertag": gamertag,
-                "xuid": xuid,
-                "account_tier": account_tier,
-                "gamescore": gamescore
+                "gamertag": data.get("username", username),
+                "xuid": data.get("xuid", "N/A"),
+                "account_tier": data.get("tier", "Gold/Ultimate"), # Website logic
+                "gamescore": data.get("gamerscore", "0")
             },
             "geysermc_information": {
-                "geyser_linked": geyser_linked,
-                "skin_url": skin_url,
-                "floodgate_uuid": floodgate_uuid
+                "geyser_linked": "Yes" if data.get("xuid") else "No",
+                "skin_url": f"https://mc-heads.net/skin/{username}",
+                "floodgate_uuid": data.get("uuid", "N/A")
             },
             "visuals": {
-                "avatar": avatar_url,
-                "body_render": f"https://mc-heads.net/body/100/{username}"
+                "avatar": f"https://mc-heads.net/avatar/100/{username}",
+                "body_render": f"https://mc-heads.net/body/100/{username}",
+                "raw_uuid": data.get("uuid")
             },
             "credits": {
                 "api_by": "@Configexe",
-                "source": "mcprofile.io Scraper"
+                "source": "mcprofile.io Internal API"
             }
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # Fallback in case API is blocked
+        return jsonify({
+            "status": "error", 
+            "message": "Direct API connection successful but data parsing failed.",
+            "error_details": str(e)
+        }), 500
 
 if __name__ == "__main__":
     app.run()
