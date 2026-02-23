@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-import base64
-import json
 
 app = Flask(__name__)
 
@@ -27,42 +25,51 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        # Step 1: Username se UUID nikalna
-        uuid_res = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}")
-        if uuid_res.status_code != 200:
-            return jsonify({"status": "error", "message": "User not found"}), 404
+        # Step 1: Pehle Java (Mojang) check karte hain
+        mojang_res = requests.get(f"https://api.mojang.com/users/profiles/minecraft/{username}")
         
-        user_data = uuid_res.json()
-        uuid = user_data['id']
-        actual_name = user_data['name']
-
-        # Step 2: UUID se Profile Details aur Skin nikalna
-        profile_res = requests.get(f"https://sessionserver.mojang.com/session/minecraft/profile/{uuid}")
-        profile_data = profile_res.json()
-
-        skin_url = "N/A"
-        # Skin link Base64 encoded texture mein hota hai
-        for prop in profile_data.get("properties", []):
-            if prop["name"] == "textures":
-                decoded_tex = json.loads(base64.b64decode(prop["value"]).decode("utf-8"))
-                skin_url = decoded_tex.get("textures", {}).get("SKIN", {}).get("url")
-
-        return jsonify({
-            "status": "success",
-            "result": {
-                "username": actual_name,
-                "uuid": uuid,
-                "uuid_formatted": f"{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}",
-                "skin_url": skin_url,
-                "render_url": f"https://mc-heads.net/body/100/{uuid}", # Character render
-                "avatar_url": f"https://mc-heads.net/avatar/100/{uuid}", # Face only
-                "profile_link": f"https://namemc.com/profile/{uuid}"
-            },
-            "credits": {
-                "api_by": "@Configexe",
-                "source": "Mojang API"
-            }
-        })
+        if mojang_res.status_code == 200:
+            # JAVA USER FOUND
+            data = mojang_res.json()
+            uuid = data['id']
+            return jsonify({
+                "status": "success",
+                "type": "Java",
+                "result": {
+                    "username": data['name'],
+                    "uuid": uuid,
+                    "skin_url": f"https://mc-heads.net/skin/{uuid}",
+                    "body_render": f"https://mc-heads.net/body/100/{uuid}",
+                    "avatar": f"https://mc-heads.net/avatar/100/{uuid}",
+                    "profile_at": f"https://namemc.com/profile/{username}"
+                },
+                "credits": {"api_by": "@Configexe"}
+            })
+        
+        else:
+            # Step 2: Agar Java nahi mila, toh Bedrock check karte hain (Geyser/Floodgate logic)
+            # Bedrock usernames usually start with '.' on many servers, but API uses XUID
+            # Hum mcprofile.io ki internal helper API use karenge
+            bedrock_res = requests.get(f"https://api.geyserconnect.net/v2/xbox/gamertag/{username}")
+            
+            if bedrock_res.status_code == 200:
+                data = bedrock_res.json()
+                xuid = str(data.get('xuid'))
+                return jsonify({
+                    "status": "success",
+                    "type": "Bedrock",
+                    "result": {
+                        "username": data.get('gamertag'),
+                        "xuid": xuid,
+                        "floodgate_id": f"00000000-0000-0000-000{hex(int(xuid))[2:]}",
+                        "avatar": f"https://mc-heads.net/avatar/100/{username}",
+                        "skin_url": "Bedrock skins are managed via Xbox Live",
+                        "note": "Use XUID for bedrock specific tools"
+                    },
+                    "credits": {"api_by": "@Configexe"}
+                })
+            else:
+                return jsonify({"status": "error", "message": "User not found on Java or Bedrock"}), 404
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
