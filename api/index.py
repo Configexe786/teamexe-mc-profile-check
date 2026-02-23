@@ -8,6 +8,7 @@ def is_valid_key(user_key):
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, 'apikey.txt')
+        if not os.path.exists(file_path): return False
         with open(file_path, 'r') as f:
             return user_key in [line.strip() for line in f.readlines()]
     except: return False
@@ -24,55 +25,48 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        # mcprofile.io ka asli internal endpoint jo search ke liye use hota hai
-        # Isse Java aur Bedrock dono ka data ek saath milta hai
-        search_url = f"https://mcprofile.io/api/v1/profile/{username}"
+        # mcprofile.io ki internal API jo seedha details deti hai
+        # Hum wahi headers bhejenge jo unka dashboard bhejta hai
+        api_url = f"https://mcprofile.io/api/v1/profile/{username}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://mcprofile.io/"
+            "Accept": "application/json",
+            "Referer": f"https://mcprofile.io/profile/{username}"
         }
+
+        response = requests.get(api_url, headers=headers, timeout=10)
         
-        response = requests.get(search_url, headers=headers, timeout=10)
-        
-        # Agar ye fail hota hai toh hum unka direct profile page try karenge
         if response.status_code != 200:
-            return jsonify({"status": "error", "message": f"User '{username}' not found. Verify the name."}), 404
+            return jsonify({"status": "error", "message": "User not found on mcprofile.io"}), 404
 
         data = response.json()
 
-        # 
-        # Data mapping as per your screenshot requirement
+        # Saara data jo aapne screenshots me dikhaya hai
         return jsonify({
             "status": "success",
             "microsoft_account_info": {
                 "gamertag": data.get("username", username),
                 "xuid": data.get("xuid", "N/A"),
-                "account_tier": data.get("tier", "Gold/Ultimate"), # Website logic
+                "account_tier": data.get("tier", "N/A"),
                 "gamescore": data.get("gamerscore", "0")
             },
             "geysermc_information": {
-                "geyser_linked": "Yes" if data.get("xuid") else "No",
-                "skin_url": f"https://mc-heads.net/skin/{username}",
+                "geyser_linked": "true" if data.get("is_geyser") else "false",
+                "skin_url": f"https://mcprofile.io/api/v1/skin/render/body/{username}", # Direct from their server
                 "floodgate_uuid": data.get("uuid", "N/A")
             },
             "visuals": {
-                "avatar": f"https://mc-heads.net/avatar/100/{username}",
-                "body_render": f"https://mc-heads.net/body/100/{username}",
-                "raw_uuid": data.get("uuid")
+                "avatar": f"https://mcprofile.io/api/v1/skin/render/avatar/{username}",
+                "full_body": f"https://mcprofile.io/api/v1/skin/render/body/{username}"
             },
             "credits": {
                 "api_by": "@Configexe",
-                "source": "mcprofile.io Internal API"
+                "source": "mcprofile.io"
             }
         })
 
     except Exception as e:
-        # Fallback in case API is blocked
-        return jsonify({
-            "status": "error", 
-            "message": "Direct API connection successful but data parsing failed.",
-            "error_details": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": "Connection error with mcprofile.io", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run()
