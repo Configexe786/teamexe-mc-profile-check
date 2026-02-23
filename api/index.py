@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import requests
-from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
@@ -26,54 +25,57 @@ def get_mc_profile():
         return jsonify({"status": "error", "message": "Username is required"}), 400
 
     try:
-        url = f"https://mcprofile.io/profile/{username}"
-        # Professional Headers taaki block na ho
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
+        # Step 1: Java (Mojang) Check
+        mojang_url = f"https://api.mojang.com/users/profiles/minecraft/{username}"
+        mojang_res = requests.get(mojang_url, timeout=5)
         
-        response = requests.get(url, headers=headers, timeout=10)
+        if mojang_res.status_code == 200:
+            data = mojang_res.json()
+            uuid = data['id']
+            return jsonify({
+                "status": "success",
+                "type": "Java",
+                "result": {
+                    "username": data['name'],
+                    "uuid": uuid,
+                    "avatar": f"https://mc-heads.net/avatar/100/{uuid}",
+                    "body": f"https://mc-heads.net/body/100/{uuid}",
+                    "skin": f"https://mc-heads.net/skin/{uuid}",
+                    "profile_link": f"https://mcprofile.io/profile/{username}"
+                },
+                "credits": {"api_by": "@Configexe"}
+            })
+
+        # Step 2: Bedrock Check (mcprofile.io & Geyser Logic)
+        # Bedrock profiles ko fetch karne ke liye hume XUID ya Floodgate ID chahiye hoti hai
+        bedrock_url = f"https://api.geyserconnect.net/v2/xbox/gamertag/{username}"
+        bedrock_res = requests.get(bedrock_url, timeout=5)
+
+        if bedrock_res.status_code == 200:
+            data = bedrock_res.json()
+            xuid = str(data.get('xuid'))
+            # Floodgate UUID format for Bedrock
+            f_uuid = f"00000000-0000-0000-0000-{int(xuid):012x}"
+            
+            return jsonify({
+                "status": "success",
+                "type": "Bedrock",
+                "result": {
+                    "username": data.get('gamertag'),
+                    "xuid": xuid,
+                    "uuid": f_uuid,
+                    "avatar": f"https://mc-heads.net/avatar/100/{username}",
+                    "body": f"https://mc-heads.net/body/100/{username}",
+                    "skin": f"https://mc-heads.net/skin/{username}",
+                    "profile_link": f"https://mcprofile.io/profile/{username}"
+                },
+                "credits": {"api_by": "@Configexe"}
+            })
         
-        if response.status_code != 200:
-            return jsonify({"status": "error", "message": f"User '{username}' not found on any database."}), 404
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # 1. UUID find karne ka solid tarika
-        uuid = "N/A"
-        copy_btn = soup.find("button", {"data-clipboard-text": True})
-        if copy_btn:
-            uuid = copy_btn["data-clipboard-text"]
-
-        # 2. Type find karna (Java ya Bedrock)
-        is_bedrock = False
-        badge = soup.find("span", string=lambda x: x and "Bedrock" in x)
-        if badge or username.startswith('.'):
-            is_bedrock = True
-
-        # 3. Image URLs (mcprofile.io uses mc-heads logic)
-        clean_user = username.replace('.', '') if is_bedrock else username
-        
-        return jsonify({
-            "status": "success",
-            "type": "Bedrock" if is_bedrock else "Java",
-            "result": {
-                "username": username,
-                "uuid": uuid,
-                "avatar": f"https://mc-heads.net/avatar/100/{username}",
-                "body_render": f"https://mc-heads.net/body/100/{username}",
-                "skin_texture": f"https://mc-heads.net/skin/{username}",
-                "mcprofile_url": url
-            },
-            "credits": {
-                "api_by": "@Configexe",
-                "source": "mcprofile.io"
-            }
-        })
+        return jsonify({"status": "error", "message": "User not found on Java or Bedrock databases."}), 404
 
     except Exception as e:
-        return jsonify({"status": "error", "message": "System Overloaded or Scraping Failed", "details": str(e)}), 500
+        return jsonify({"status": "error", "message": "API Connection Timeout", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run()
